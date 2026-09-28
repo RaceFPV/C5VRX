@@ -34,3 +34,22 @@ and close/weak RF behavior. USB `p` reports transport counters; verify
 `tx_empty`, `rx_ovf`, `gdma_in`, `gdma_out`, `bs_empty`, and `bs_eof` stay zero.
 Stop the experiment and restore the previous firmware if the picture becomes
 unusable or sync is unstable.
+
+## Phase8 gain follow-up
+
+The first live picture had good color, but the operator saw high-gain RF
+artifacts. With the carrier on, Direct Gain V2 selected G31..G36, while the
+slow IQ windows showed P17..25, Q99..100, zero clipping and zero near-origin
+samples. Transport fault counters stayed zero. A later G56 manual snapshot was
+taken after the VTX was switched off and is **not** an image-quality A/B.
+
+The Phase8 build therefore keeps Direct Gain V2's 6 ms observer, physical
+RF/BB/Fine tuple model and exact-edge learning, but uses a separate gain
+policy: P13..19 is the quiet hold band, four consecutive hot windows (P>20
+or clipping) request a lower physical state, and eight weak windows request
+more sensitivity. A hard overload cuts immediately. Normal writes have an
+80 ms settle hold, and no carrier returns to the proven survival gain. These
+thresholds are starting values for live A/B, not a claim that the visual
+artifact is fully fixed. The ROM RSSI reading has not been validated as a
+pre-gain signal-strength measure; the normal Direct Gain V2 profile does not
+collect it, so prior `rssi_valid=0` snapshots cannot support RSSI control.

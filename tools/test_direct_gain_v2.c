@@ -78,6 +78,44 @@ int main(void)
     assert(direct_gain_v2_tick(&v2, &lost) == 62u);
     assert(v2.writes == 1u);
 
+    /* Phase8 uses the same fine-grained tuple chooser with a quieter target.
+     * Single hot windows do not cause writes; persistent hot IQ does. */
+    direct_gain_v2_reset(&v2, &table, 35u, 62u);
+    direct_gain_v2_set_phase8_mode(&v2, true);
+    for (unsigned i = 0; i < 3; ++i) {
+        direct_gain_v2_observation_t noisy = obs(25, 99, 0, 0,
+                                                 100000u + i * 6000u);
+        assert(direct_gain_v2_tick(&v2, &noisy) == 35u);
+    }
+    direct_gain_v2_observation_t noisy = obs(25, 99, 0, 0, 118000u);
+    uint8_t quiet_gain = direct_gain_v2_tick(&v2, &noisy);
+    assert(quiet_gain < 35u && quiet_gain >= DIRECT_GAIN_V2_FLOOR);
+    direct_gain_v2_sync_applied(&v2, quiet_gain, noisy.observed_us);
+    for (unsigned i = 0; i < 12; ++i) {
+        noisy.observed_us += 6000u;
+        assert(direct_gain_v2_tick(&v2, &noisy) == quiet_gain);
+    }
+    /* A good Phase8 IQ window holds its gain even above the old P target. */
+    direct_gain_v2_observation_t good = obs(17, 99, 0, 0, 300000u);
+    assert(direct_gain_v2_tick(&v2, &good) == quiet_gain);
+    assert(v2.state == DIRECT_GAIN_V2_LOCK);
+    /* Clipping also cuts gain when median P alone looks acceptable. */
+    direct_gain_v2_reset(&v2, &table, 35u, 62u);
+    direct_gain_v2_set_phase8_mode(&v2, true);
+    for (unsigned i = 0; i < 3; ++i) {
+        direct_gain_v2_observation_t clipped = obs(16, 99, 0, 30,
+                                                   500000u + i * 6000u);
+        assert(direct_gain_v2_tick(&v2, &clipped) == 35u);
+    }
+    direct_gain_v2_observation_t clipped = obs(16, 99, 0, 30, 518000u);
+    assert(direct_gain_v2_tick(&v2, &clipped) < 35u);
+    /* A lost carrier returns to the known sensitivity state once. */
+    lost = obs(1, 0, 980, 0, 400000u);
+    assert(direct_gain_v2_tick(&v2, &lost) == 62u);
+    direct_gain_v2_sync_applied(&v2, 62u, lost.observed_us);
+    lost.observed_us += 6000u;
+    assert(direct_gain_v2_tick(&v2, &lost) == 62u);
+
     puts("direct gain v2: OK");
     return 0;
 }

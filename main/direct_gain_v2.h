@@ -49,11 +49,14 @@ typedef struct {
     uint64_t write_us;
     uint64_t last_slow_write_us;
     uint32_t writes, locks, stale_rejects, boundary_writes, slow_samples;
+    bool phase8_mode;
+    uint8_t phase8_hot_windows, phase8_weak_windows;
     direct_gain_v2_state_t state;
 } direct_gain_v2_t;
 
 void direct_gain_v2_reset(direct_gain_v2_t *v2, const arc_gain_table_t *table,
                           uint8_t current_gain, uint8_t survival_gain);
+void direct_gain_v2_set_phase8_mode(direct_gain_v2_t *v2, bool enabled);
 uint8_t direct_gain_v2_tick(direct_gain_v2_t *v2,
                             const direct_gain_v2_observation_t *observation);
 void direct_gain_v2_sync_applied(direct_gain_v2_t *v2, uint8_t applied_gain,

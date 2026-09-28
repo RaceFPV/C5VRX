@@ -1390,6 +1390,9 @@ static void direct_gain_v2_fast_tick(const control_metrics_t *metrics,
         seen_arc_generation != arc_generation) {
         direct_gain_v2_reset(&s_direct_gain_v2, rf_get_arc_gain_table(),
                              s_current_gain, rf_get_arc_survival_gain());
+#if CONFIG_C5VRX_PHASE8_HR_LIVE_TEST
+        direct_gain_v2_set_phase8_mode(&s_direct_gain_v2, true);
+#endif
         seen_profile_generation = profile_generation;
         seen_arc_generation = arc_generation;
         was_active = true;

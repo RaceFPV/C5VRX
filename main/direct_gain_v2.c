@@ -66,7 +66,8 @@ static unsigned boundary_cost(const direct_gain_v2_t *v2,
 
 static uint8_t choose_target(direct_gain_v2_t *v2,
                              const direct_gain_v2_observation_t *o,
-                             bool hard)
+                             bool hard, int target_p, int band_lo,
+                             int band_hi)
 {
     uint8_t best = v2->current_gain;
     int best_score = 0x7fffffff;
@@ -77,8 +78,8 @@ static uint8_t choose_target(direct_gain_v2_t *v2,
         int p = predicted_p(v2, o->p, v2->current_gain, (uint8_t)g, &learned);
         /* Normal corrections accept a broad useful amplitude. This lets an
          * individual Fine adjustment win over a disruptive RF boundary. */
-        int amplitude_error = hard ? abs_i(p - V2_TARGET_P) :
-            (p < 17 ? 17 - p : p > 27 ? p - 27 : 0);
+        int amplitude_error = hard ? abs_i(p - target_p) :
+            (p < band_lo ? band_lo - p : p > band_hi ? p - band_hi : 0);
         int score = amplitude_error * 12;
         if (p < V2_LOCK_MIN_P) score += (V2_LOCK_MIN_P - p) * 16;
         if (p > V2_LOCK_MAX_P) score += (p - V2_LOCK_MAX_P) * 20;
@@ -138,10 +139,79 @@ void direct_gain_v2_reset(direct_gain_v2_t *v2, const arc_gain_table_t *table,
     v2->state = DIRECT_GAIN_V2_SEEK;
 }
 
+void direct_gain_v2_set_phase8_mode(direct_gain_v2_t *v2, bool enabled)
+{
+    if (!v2) return;
+    v2->phase8_mode = enabled;
+    v2->phase8_hot_windows = 0;
+    v2->phase8_weak_windows = 0;
+}
+
+/* Phase8 resolves smaller angular changes than Phase5, making RF noise more
+ * visible even while Q4 has not reached the clipping rail. Keep V2's physical
+ * tuple and learned-edge selection, but use a quieter P window. A 6 ms sample
+ * is evidence only after repeated windows. Hard ADC overload still cuts at
+ * once; loss of carrier returns to the known survival gain. */
+static uint8_t phase8_tick(direct_gain_v2_t *v2,
+                           const direct_gain_v2_observation_t *o)
+{
+    bool no_carrier = o->p <= 4 && o->origin_pm >= 650 && o->q < 18;
+    bool hard_overload = o->p > 44 || (o->p > 35 && o->clip_pm >= 250);
+    bool hot = o->p > 20 || o->clip_pm >= 20;
+    bool weak = o->p < 10 || o->origin_pm >= 250 || o->q < 55;
+
+    if (no_carrier) {
+        v2->phase8_hot_windows = v2->phase8_weak_windows = 0;
+        if (v2->current_gain == v2->survival_gain) return v2->current_gain;
+    } else if (hot) {
+        v2->phase8_weak_windows = 0;
+        if (v2->phase8_hot_windows < 255) ++v2->phase8_hot_windows;
+    } else if (weak) {
+        v2->phase8_hot_windows = 0;
+        if (v2->phase8_weak_windows < 255) ++v2->phase8_weak_windows;
+    } else {
+        v2->phase8_hot_windows = v2->phase8_weak_windows = 0;
+        v2->state = DIRECT_GAIN_V2_LOCK;
+        ++v2->locks;
+        return v2->current_gain;
+    }
+
+    if (!no_carrier && !hard_overload) {
+        if (o->observed_us <= v2->write_us ||
+            o->observed_us - v2->write_us < 80000u) return v2->current_gain;
+        if (hot && v2->phase8_hot_windows < 4u) return v2->current_gain;
+        if (weak && v2->phase8_weak_windows < 8u) return v2->current_gain;
+    }
+
+    direct_gain_v2_observation_t candidate = *o;
+    /* Rail hits are real overload even if the median P remains modest. Give
+     * the candidate search enough pressure to cross one quieter Fine state. */
+    if (candidate.clip_pm >= 20 && candidate.p < 23) candidate.p = 23;
+    uint8_t target = no_carrier ? v2->survival_gain :
+        choose_target(v2, &candidate, hard_overload, 16, 13, 19);
+    target = clamp_gain(v2, target);
+    if (target == v2->current_gain) return target;
+
+    v2->phase8_hot_windows = v2->phase8_weak_windows = 0;
+    v2->target_gain = target;
+    v2->prior_gain = v2->current_gain;
+    v2->prior_p = o->p;
+    v2->prior_q = o->q;
+    v2->prior_origin = o->origin_pm;
+    v2->prior_clip = o->clip_pm;
+    if (boundary_cost(v2, v2->current_gain, target)) ++v2->boundary_writes;
+    v2->current_gain = target;
+    v2->state = DIRECT_GAIN_V2_VERIFY;
+    ++v2->writes;
+    v2->write_us = o->observed_us;
+    return target;
+}
+
 uint8_t direct_gain_v2_tick(direct_gain_v2_t *v2,
                             const direct_gain_v2_observation_t *o)
 {
     if (!v2 || !o) return 52u;
+    if (v2->phase8_mode) return phase8_tick(v2, o);
     if (v2->state == DIRECT_GAIN_V2_VERIFY) {
         if (o->observed_us <= v2->write_us ||
             o->observed_us - v2->write_us < V2_FRESH_US) {
@@ -173,7 +243,8 @@ uint8_t direct_gain_v2_tick(direct_gain_v2_t *v2,
         o->p >= 12 && o->p <= 32) return v2->current_gain;
 
     uint8_t target = no_carrier ? v2->survival_gain :
-        choose_target(v2, o, hard_overload || hard_fade);
+        choose_target(v2, o, hard_overload || hard_fade,
+                      V2_TARGET_P, 17, 27);
     target = clamp_gain(v2, target);
     if (target != v2->current_gain) {
         v2->target_gain = target;
