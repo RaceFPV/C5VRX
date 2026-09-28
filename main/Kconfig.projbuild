@@ -42,6 +42,15 @@ menu "C5VRX diagnostic probes"
 endmenu
 
 menu "C5VRX experimental video demodulators"
+    config C5VRX_PHASE8_HR_LIVE_TEST
+        bool "Run lower-swing Phase8-HR directly on live 6BIT@40 video"
+        default y
+        help
+            Experimental issue #103 A/B: Phase8 endpoints, BIAS 76,
+            MULT 2, and two BitScrambler bundles per 50 ns pair. It
+            forces 6BIT@40 output. Large phase deltas outside -38..+89
+            Phase8 bins can still wrap; this is not a final safe clamp.
+
     config C5VRX_PHASE5_360_LIVE
         bool "Use Phase5-360 research program (Golden DAC output only)"
         default y
