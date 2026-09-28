@@ -52,3 +52,20 @@ as selectable automatic gain profiles. Previously stored legacy gain choices
 migrate to V2. GOLDEN is the sole selectable live demodulator; previously
 stored TRAJ V2 choices migrate to GOLDEN. Historical experimental code stays
 available for research, but is not reachable through the profile selector.
+
+## Q[6:3]/I[6:3] experiment
+
+The `feat/iq63-gain` branch routes DIAG[3:6] and DIAG[13:16] into the same
+Q-low/I-high PARLIO byte consumed by Golden and by Direct Gain V2's completed-IQ
+observer. V2 therefore measures the selected bits; it does not inspect a
+separate hard-coded Q[9:6]/I[9:6] byte. The experimental build starts V2 at
+G20 and opens its lower search bound to G2 because the 6:3 nibble has eight
+times the nominal amplitude sensitivity of 9:6.
+
+This routing omits the real signed ADC bit 9 on both axes. Above the usable
+6:3 amplitude window, the nibbles wrap and can look deceptively small. The
+controller cannot prove absence of that alias from the eight routed bits
+alone. PR #94 combined this routing with maximum locked RF gain and desynced;
+that hardware result does not test adaptive gain, but it makes this branch a
+hardware experiment rather than a production quality claim. First compare
+fixed low gains and inspect P/Q/origin/clip before trusting automatic V2.

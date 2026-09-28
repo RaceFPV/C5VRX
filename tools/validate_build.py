@@ -683,7 +683,7 @@ check("Direct Gain V2 protects fresh IQ and clean zero-write lock",
       'V2_FRESH_US 12000u' in direct_gain_v2_c and
       'o->observed_us <= v2->write_us' in direct_gain_v2_c and
       'if (useful(o))' in direct_gain_v2_c and
-      'DIRECT_GAIN_V2_FLOOR 20u' in direct_gain_v2_h)
+      'DIRECT_GAIN_V2_FLOOR 2u' in direct_gain_v2_h)
 check("Direct Gain V2 learns exact physical edges",
       'e->from == from && e->to == to' in direct_gain_v2_c and
       'e->count >= 3' in direct_gain_v2_c)

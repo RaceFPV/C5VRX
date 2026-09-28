@@ -340,7 +340,7 @@ static esp_err_t prepare_rx(void)
         .clk_out_gpio_num  = -1,
         .valid_gpio_num    = -1,
         /* GPIO order must match s_iq_pins[] in rf.c:
-         * Q[9:6] on GPIO 1,0,25,7 then I[9:6] on GPIO 10,5,3,4. */
+         * Q[6:3] on GPIO 1,0,25,7 then I[6:3] on GPIO 10,5,3,4. */
         .data_gpio_nums    = {
             GPIO_NUM_1, GPIO_NUM_0, GPIO_NUM_25, GPIO_NUM_7,
             GPIO_NUM_10, GPIO_NUM_5, GPIO_NUM_3, GPIO_NUM_4,
@@ -1533,7 +1533,9 @@ static void settings_load(void)
         case RX_PROFILE_ARC:          s_current_gain = rf_get_arc_survival_gain(); break;
         case RX_PROFILE_ARC_V3_EXP:   s_current_gain = rf_get_arc_survival_gain(); break;
         case RX_PROFILE_ARC_V5_AUTOTUNE_EXP: s_current_gain = rf_get_arc_survival_gain(); break;
-        case RX_PROFILE_DIRECT_GAIN:  s_current_gain = rf_get_arc_survival_gain(); break;
+        /* Start the narrow Q[6:3]/I[6:3] tap with headroom. V2 will move
+         * from this state using metrics from the same routed 8-bit IQ stream. */
+        case RX_PROFILE_DIRECT_GAIN:  s_current_gain = 20u; break;
         case RX_PROFILE_DIRECT_GAIN_V1: s_current_gain = rf_get_arc_survival_gain(); break;
         default:                      s_current_gain = 52u; break;
         }
@@ -1687,7 +1689,7 @@ static void lab_print_row(const char *kind, const hw_transport_counters_t *base)
     rf_get_phy_snapshot(&phy);
 
     printf("C5VRX_LAB_ROW kind=%s gain=%u gain_reg=0x%08lx bw=%u afc=%u offset_khz=%d "
-           "agc=%u state=%u profile=%u p=%d q=%d clip_pm=%d origin_pm=%d strength=%d "
+           "agc=%u state=%u profile=%u iq_tap=6:3 p=%d q=%d clip_pm=%d origin_pm=%d strength=%d "
            "nf_valid=%u nf_dbm=%d rssi_valid=%u rssi_dbm=%d "
            "dc_i_x100=%d dc_q_x100=%d iq_skew_pm=%d iq_cross_pm=%d "
            "winding_pm=%d strong_winding_pm=%d sync_q=%d sync_width=%u "

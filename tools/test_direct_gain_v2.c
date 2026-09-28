@@ -62,12 +62,16 @@ int main(void)
     };
     assert(direct_gain_v2_tick(&v2, &weak) == 39u);
 
-    /* Hard overload is a direct target hop and respects the G20 floor. */
+    /* Hard overload is a direct target hop and may use the low gain states
+     * required by the narrower Q[6:3]/I[6:3] tap. */
     direct_gain_v2_reset(&v2, &table, 48u, 62u);
     direct_gain_v2_observation_t hot = obs(98, 90, 0, 900, 1000000);
     uint8_t safe = direct_gain_v2_tick(&v2, &hot);
     assert(safe < 48u && safe >= DIRECT_GAIN_V2_FLOOR);
     assert(v2.writes == 1u);
+    direct_gain_v2_reset(&v2, &table, 20u, 62u);
+    safe = direct_gain_v2_tick(&v2, &hot);
+    assert(safe < 20u && safe >= DIRECT_GAIN_V2_FLOOR);
 
     /* Loss of carrier performs one direct survival hop, then no hunt. */
     direct_gain_v2_reset(&v2, &table, 30u, 62u);

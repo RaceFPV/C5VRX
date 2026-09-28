@@ -13,7 +13,7 @@
  *   - No power saving (WIFI_PS_NONE)
  *   - Promiscuous RX to keep MODEM_DIAG active
  *   - All 5 LMAC TX queues hardware-disabled (receive-only)
- *   - MODEM_DIAG DIAG[6:9] (Q[9:6]) and DIAG[16:19] (I[9:6]) routed to GPIO
+ *   - MODEM_DIAG DIAG[3:6] (Q[6:3]) and DIAG[13:16] (I[6:3]) routed to GPIO
  *
  * Returns ESP_OK on success.
  * Returns an error if BW40 is not available -- NO BW20 fallback.

@@ -6,7 +6,10 @@
 
 #define DIRECT_GAIN_V2_MAX_STATES (ARC_VENDOR_GAIN_MAX + 1u)
 #define DIRECT_GAIN_V2_EDGE_SLOTS 16u
-#define DIRECT_GAIN_V2_FLOOR 20u
+/* The Q[6:3]/I[6:3] tap is eight times more sensitive than Q[9:6]/I[9:6].
+ * Keep the vendor's lowest supported state available so the controller can
+ * back off before the narrow 4-bit window wraps. */
+#define DIRECT_GAIN_V2_FLOOR 2u
 
 typedef enum {
     DIRECT_GAIN_V2_SEEK = 0,
