@@ -12,6 +12,7 @@
 
 #include "rf.h"
 #include "native_analog_agc.h"
+#include "native_agc_pace.h"
 #include "freertos/FreeRTOS.h"
 
 #include <stdint.h>
@@ -520,6 +521,7 @@ esp_err_t rf_agc_offset_save(void)
 
 void rf_agc_offset_set(int db)
 {
+    if (db) (void)native_agc_pace_set(0, 20);
     analog_agc_cancel();
     if (db < -12) db = -12;
     if (db > 12) db = 12;
@@ -547,6 +549,7 @@ const char *rf_agc_offset_field_name(void)
 
 void rf_set_bb_agc(bool enable)
 {
+    (void)native_agc_pace_set(0, 20);
     analog_agc_cancel();
     if (!s_native_agc) return;
     extern void phy_disable_agc(void);
@@ -563,6 +566,7 @@ bool rf_bb_agc_enabled(void)
 
 void rf_set_fine_iq(bool fine)
 {
+    if (fine) (void)native_agc_pace_set(0, 20);
     analog_agc_cancel();
     if (fine == s_iq_fine) return;
     const uint8_t *diag = fine ? s_iq_diag_fine : s_iq_diag;
@@ -1133,7 +1137,8 @@ static int s_analog_agc_request;
 
 static bool analog_agc_eligible(void)
 {
-    return !__atomic_load_n(&s_analog_rf_transitions, __ATOMIC_ACQUIRE) &&
+    return !native_agc_pace_enabled() &&
+           !__atomic_load_n(&s_analog_rf_transitions, __ATOMIC_ACQUIRE) &&
            s_native_agc && !s_bb_agc_off && !s_iq_fine &&
            !s_agc_tune && !s_native_initgain &&
            (s_native_acq_profile == 0u || s_native_acq_profile == NATIVE_ACQ_COUNT - 1u) &&
@@ -1187,12 +1192,17 @@ static bool analog_agc_cancel(void)
 static void analog_agc_transition_begin(void)
 {
     __atomic_add_fetch(&s_analog_rf_transitions, 1u, __ATOMIC_ACQ_REL);
+    native_agc_pace_suspend();
     (void)analog_agc_cancel();
 }
 
 static void analog_agc_transition_end(void)
 {
-    __atomic_sub_fetch(&s_analog_rf_transitions, 1u, __ATOMIC_ACQ_REL);
+    if (__atomic_sub_fetch(&s_analog_rf_transitions, 1u, __ATOMIC_ACQ_REL) == 0u &&
+        native_agc_pace_enabled()) {
+        esp_err_t err = native_agc_pace_resume();
+        if (err != ESP_OK) ESP_LOGW(TAG, "AGC pace resume: %s", esp_err_to_name(err));
+    }
 }
 
 bool rf_analog_agc_service(void)
@@ -1715,6 +1725,7 @@ esp_err_t rf_set_channel(size_t index)
     wifi_second_chan_t verify_secondary = WIFI_SECOND_CHAN_NONE;
     err = esp_wifi_get_channel(&verify_primary, &verify_secondary);
     if (err != ESP_OK || verify_primary != wifi_channel) {
+        analog_agc_transition_end();
         return (err != ESP_OK) ? err : ESP_ERR_INVALID_STATE;
     }
 

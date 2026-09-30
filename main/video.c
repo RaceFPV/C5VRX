@@ -48,6 +48,7 @@
 #include "afc_v2.h"
 #include "afc_v2_ctrl.h"
 #include "agc_offset.h"
+#include "native_agc_pace.h"
 #include "rx_auto_lab.h"
 #include "trajectory_v2_lut.h"
 #include "hal/parlio_ll.h"
@@ -4009,6 +4010,7 @@ static void quiet_tx_interrupts(void)
 
 static void start_flight_demodulator(void)
 {
+    if (s_live_demod != LIVE_PHASE8_FULL) (void)native_agc_pace_set(0, 20);
     ESP_ERROR_CHECK(bitscrambler_enable(s_flight_bs));
 #if CONFIG_C5VRX_PHASE8_HR_LIVE_TEST
     ESP_ERROR_CHECK(s_output_mode == VIDEO_OUTPUT_6BIT_40 ?
@@ -5446,6 +5448,19 @@ static void console_diag_task(void *arg)
                     rf_native_acq_report();
                     rf_native_wdg_report("query");
                     rf_analog_agc_report("query");
+                    native_agc_pace_report();
+                } else if (c == '~' || c == ':' || c == ';') {
+                    if (c == '~' && native_agc_pace_enabled()) {
+                        native_agc_pace_toggle();
+                    } else if (!rf_native_agc_active() || rf_fine_iq_active() ||
+                        s_live_demod != LIVE_PHASE8_FULL || rf_agc_offset_db()) {
+                        printf("AGC_PACE rejected_need_native_full_coarse_zero_offset\n");
+                    } else {
+                        rf_analog_agc_request(0);
+                        (void)rf_analog_agc_service();
+                        if (c == '~') native_agc_pace_toggle();
+                        else native_agc_pace_cycle(c == ';');
+                    }
                 } else if (c == '[' || c == ']' || c == '%') {
                     rf_analog_agc_request(c == '[' ? 1u : c == ']' ? 2u : 0u);
                     printf("C5VRX_ANALOG_AGC queued=%c auto_restore_s=20 ram_only=1\n", c);
@@ -5902,6 +5917,9 @@ esp_err_t video_start(void)
 
     settings_load();
     s_live_demod = demod_boot_requested();
+#if CONFIG_C5VRX_NATIVE_AGC_PACED
+    if (rf_native_agc_active()) s_live_demod = LIVE_PHASE8_FULL;
+#endif
 #if CONFIG_C5VRX_PHASE8_HR_LIVE_TEST
     s_output_mode = VIDEO_OUTPUT_6BIT_40;
 #endif
@@ -6004,6 +6022,15 @@ esp_err_t video_start(void)
 #endif
 
     /* Start interactive console for on-demand diagnostics (zero periodic CPU/bus traffic) */
+#if CONFIG_C5VRX_NATIVE_AGC_PACED
+    if (rf_native_agc_active()) {
+        esp_err_t pace_err = native_agc_pace_set(
+            CONFIG_C5VRX_NATIVE_AGC_PACE_PERIOD_US,
+            CONFIG_C5VRX_NATIVE_AGC_PACE_WINDOW_US);
+        printf("AGC_PACE boot err=%s\n", esp_err_to_name(pace_err));
+        native_agc_pace_report();
+    }
+#endif
     /* 6 KiB: P8ENV / LAB_ROW printf calls take ~90 arguments each. */
     xTaskCreate(console_diag_task, "console_diag", 6144, NULL, 1, NULL);
 

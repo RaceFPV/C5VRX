@@ -110,3 +110,8 @@ millisecond label. A rate-changing native build remains unimplemented pending
 identification and measurement of the hardware control. The existing normal
 image can be rebuilt, but this is not completion of the requested cadence
 change and must not be advertised as one.
+
+Subsequent explicit user authorization changed the implementation request:
+pause BB AGC between brief native tracking windows rather than locate a native
+period register. See `native-agc-paced.md`. This is now built as a GPTimer gate
+experiment; it does not establish a decoded silicon cadence control.

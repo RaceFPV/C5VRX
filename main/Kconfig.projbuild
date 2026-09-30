@@ -1,4 +1,25 @@
 menu "C5VRX diagnostic probes"
+    config C5VRX_NATIVE_AGC_PACED
+        bool "Start user-requested gated native AGC experiment"
+        default y
+        depends on !C5VRX_NATIVE_AGC_CAPTURE_ONLY
+        help
+            Hardware still chooses gain. A GPTimer gates BB tracking between
+            brief acquisition windows. Boots Full Phase8. Experimental:
+            overload response and resume behavior need board validation.
+
+    config C5VRX_NATIVE_AGC_PACE_PERIOD_US
+        int "Native AGC release period (microseconds)"
+        depends on C5VRX_NATIVE_AGC_PACED
+        range 250 20000
+        default 1000
+
+    config C5VRX_NATIVE_AGC_PACE_WINDOW_US
+        int "Native AGC open window (microseconds)"
+        depends on C5VRX_NATIVE_AGC_PACED
+        range 10 200
+        default 20
+
     config C5VRX_NATIVE_AGC_CAPTURE_ONLY
         bool "Build standalone native AGC meter (no video output)"
         default n

@@ -64,6 +64,12 @@ requirements by themselves**.
   RX gain; every firmware gain write must stay refused at `rf_set_rx_gain()`.
   Firmware gain controllers (Direct Gain V3 etc.) run only after `N` stores an
   explicit NVS `c5vrx/native_agc = 0`.
+- User-authorized exception (2026-09-30): `C5VRX_NATIVE_AGC_PACED` gates
+  `7030[29]` for brief native tracking windows between held intervals. Native
+  still selects every gain; firmware must not choose or force a gain index.
+  This is an experimental alternative to continuous tracking, not a claim
+  that the hardware supports a decoded periodic native scheduler. Keep Full
+  Phase8, log gate timing, suspend across retunes and provide continuous rollback.
 - The normal live source is MODEM_DIAG Q4/I4 captured by PARLIO RX; active
   MAC-owned dump SRAM is a diagnostic writer, not a readable live source.
 - Do not turn a physical SRAM or DMA block boundary into a DSP reset.

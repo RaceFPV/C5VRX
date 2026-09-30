@@ -9,6 +9,7 @@ set(c5vrx_sources
         "arc_v5_autotune.c"
         "rx_auto_lab.c"
         "rf.c"
+        "native_agc_pace.c"
         "video.c"
         "direct_gain.c"
         "direct_gain_v2.c"
@@ -16,7 +17,7 @@ set(c5vrx_sources
         "menu_raster.c"
 )
 if(CONFIG_C5VRX_NATIVE_AGC_CAPTURE_ONLY)
-    set(c5vrx_sources "agc_capture_main.c" "rf.c" "arc_phy.c" "phy_phase_tap_probe.c")
+    set(c5vrx_sources "agc_capture_main.c" "rf.c" "arc_phy.c" "phy_phase_tap_probe.c" "native_agc_pace.c")
 endif()
 idf_component_register(
     SRCS ${c5vrx_sources}
@@ -29,6 +30,7 @@ idf_component_register(
         esp_netif
         esp_driver_parlio
         esp_driver_gpio
+        esp_driver_gptimer
         esp_driver_bitscrambler
         esp_driver_usb_serial_jtag
         vfs
