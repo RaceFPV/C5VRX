@@ -286,3 +286,153 @@ achieves additional controlled RF attenuation at the same Phase5-level
 colour, detail, sync stability and fade recovery. Picture smoothing at the
 same RF limit is a different result. No additional sensitivity in dB, range
 in metres or final winning demodulator has yet been demonstrated.
+
+## Expanded scope: replacing the pipeline
+
+The operator subsequently rejected the limited estimator as an adequate
+answer and allowed re-engineering the whole pipeline for range. The
+two-bundle shape is no longer the boundary of the design search. The following
+are proposals only; no firmware, RTL, wiring or board setting was changed.
+
+### Clock and engine audit
+
+The official [C5 technical reference manual](https://www.espressif.com/sites/default/files/documentation/esp32-c5_technical_reference_manual_en.pdf)
+downloaded for this review identifies itself as Version 1.1. Chapter 9,
+Table 9.2-2, says AHB frequency cannot exceed crystal frequency. Chapter 44
+describes processing per DMA clock and the shared BitScrambler engine.
+CPU 240 MHz is therefore not a supported 240 MHz DSP clock for this path.
+There is no documented multiplier providing six bundles per 50 ns pair.
+Changing the output geometry can nevertheless increase bundles per *unique*
+video value without violating the bus rate.
+
+### C5-only candidate: three bundles per three output bytes
+
+At a 40 MHz bus/output clock, a three-bundle loop can consume three IQ bytes
+and emit three DAC bytes each 75 ns. Reads of 16+8 and writes of 8+16 bits
+use supported widths. The unique-video rate is 13.333 MS/s with `[D,D,D]`
+holds, rather than 20 MS/s `[D,D]`. Nyquist is 6.667 MHz.
+
+A specific layout to investigate is a calibrated Phase6 span-75 detector.
+Six-bit phase arithmetic can occupy Counter A bits 10..15, leaving the
+ten-bit LUT address independent of those six phase bits. A 256-word IQ
+decoder and separate 64-word DAC map then fit without four decoder replicas.
+
+| Bundle | Arithmetic / lookup | Stream work |
+| --- | --- | --- |
+| 1 | Load retained negative phase above counter bit 9; address current IQ decoder; retain previous DAC lookup result | read16, write8 |
+| 2 | Add biased current phase above bit 9; retain its negative phase outside DAC history bits | read8, write16 duplicating retained DAC |
+| 3 | Address DAC map from updated six-bit delta; loop control | no read/write |
+
+This schedule has one period of pipeline latency. Counter low bits must be
+bounded against carry into phase arithmetic. Lookup latency, source endpoint
+position, output history and 8/16-bit emission order need a dataflow proof.
+No assembled or hardware-verified program is claimed.
+
+One six-bit delta code represents about 208.33 kHz, versus 312.5 kHz per
+final DAC code in current full-span Phase8. The extra stage permits a separate
+calibrated frequency-to-DAC transfer. These are representation properties,
+not RF sensitivity or guaranteed noise improvement.
+
+Trade-offs: span-75 wraps at +/-6.667 MHz, reducing CFO/deviation headroom.
+It still discards middle samples and is not exact adjacent FM. Its small-signal
+averaging factor is `|1+2*cos(2*pi*f/40MHz)|/3`, about -1.46 dB at PAL chroma
+versus approximately -0.54 dB for the current two-sample factor. This is not
+a steep video anti-alias filter. Rate reduction alone proves no range benefit.
+
+This is a substantive firmware-only candidate, but it does not establish
+sufficient arithmetic for a complete wideband tracking receiver.
+
+### Decode actual bit regions rather than false Cartesian coordinates
+
+A noncontiguous lane set represents a set of possible ADC intervals. For
+approximately constant-envelope FM, a joint I/Q code plus radius/noise model
+can sometimes resolve those intervals using ring geometry. A LUT can estimate
+phase directly from the possible regions instead of assuming each nibble is
+one ordinary signed coordinate. This is another numerical candidate, not a
+selected lane map.
+
+Folding is not automatically invertible: different phases can have identical
+codes, particularly near axes and folding radii. Noise, multipath and native
+radius spread weaken the ring prior. Choosing sign plus alternative magnitude
+bits therefore requires a held-out comparison across radii and C/N. It must
+not be justified by one perfect-circle simulation.
+
+### Wider architecture: C5 RF front end plus external DSP logic
+
+The GPIO diagnostic bus does not share PARLIO's eight-line input limit.
+Aligned captures establish Q[4:9] and I[4:9] as actual ADC bits. Twelve lanes
+would provide six signed bits per axis over the full ADC range: four times
+the resolution of Q4/I4, without FINE's reduced window. Individual bit proofs
+do not yet prove simultaneous twelve-lane timing.
+
+Moving DAC driving to external logic frees the six current DAC pins, allowing
+the XIAO pin budget to be reassigned for more IQ lanes and a source clock.
+Pin accessibility, clock export, skew and electrical timing remain gates.
+40 MS/s is the initial target. 80 MS/s requires a separate clock/timing proof;
+asynchronous CPU snapshots cannot supply either continuous stream.
+
+Proposed architecture:
+
+```text
+C5 RF / ADC / native gain selection
+ -> source-synchronous I6 + Q6
+ -> complex channel filter and measured DC/IQ correction
+ -> adjacent-FM / tracking-demodulator comparison
+ -> matched de-emphasis and video anti-alias filter
+ -> rate reduction and DAC calibration
+ -> continuous DAC + reconstruction filter
+```
+
+External FPGA logic removes the shared 2 KiB LUT and two-bundle restriction.
+[Lattice UltraPlus](https://www.latticesemi.com/Products/FPGAandCPLD/iCE40UltraPlus)
+is a capability example, not a selected part or a synthesis/timing result.
+Filters and the tracking loop need resource/throughput budgets before device
+selection. The C5 stays the RF/control front end; sample processing and video
+output move to deterministic external logic.
+
+This enables rejecting noise before angle detection and implementing a real
+tracking detector with controlled bandwidth. A complex channel filter must
+preserve the **FM sidebands**, not just the 6 MHz video baseband. It cannot
+reverse aliasing that already occurred before this tap. Twelve-lane capture
+improves quantization, not RF noise figure. No numerical range gain is proven.
+
+Receiver diversity is a further option, but coherent combination needs
+independent receivers, clock/CFO alignment and channel estimation. Raw IQ
+streams with different phases cannot simply be averaged.
+
+### Documentation assumptions that need correction
+
+Comparing [static-reduction-and-filtering.md](static-reduction-and-filtering.md)
+with primary references exposes several unsupported premises:
+
+- Upstream filtering exists, but its placement relative to MODEM_DIAG is
+  unresolved. Definite absence of pre-tap anti-alias filtering is not proved.
+- Without winding, endpoint differentiation retains a boxcar factor; it is
+  not simply unfiltered decimation, although it is not a full anti-alias filter.
+- [ITU-R F.405-1](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.405-1-197007-W!!PDF-E.pdf)
+  specifies a particular television emphasis curve. It does not prove our VTX
+  uses that curve. A shunt capacitor is not automatically a matched network.
+- Reconstruction pole calculations must include the six driven DAC branches
+  as source impedances. Ideal 8200/3900/2000/1000/470/240-ohm branches have
+  parallel resistance about 122.36 ohms. Including the 200-ohm shunt and
+  75-ohm display gives about 37.73 ohms. Thus 470 pF yields approximately
+  8.98 MHz, not the cited 6.2 MHz. GPIO impedance, wiring and termination
+  further change the physical result.
+
+Matched transmitter/receiver emphasis can recover the intended waveform with
+less output noise. Arbitrary low-pass smoothing can lose colour/detail.
+These must not be treated as the same engineering operation.
+
+### Updated recommendation
+
+Do not promote the previous quadrant estimator as the final answer. For the
+existing board, investigate three-bundle/rate geometry and verified pre-tap
+filter behaviour; code-region-aware lane decoding is another numerical
+candidate. For a complete architectural redesign, twelve-lane external DSP
+is the clearest identified route around both input resolution and instruction
+limits. It requires new hardware and remains a design hypothesis.
+
+The decision criterion remains additional controlled RF attenuation at equal
+full-band Phase5 quality and fade recovery. This review identifies architectures
+and incorrect assumptions; it does not establish a final winner. No new
+implementation or hardware experiment was performed in this expanded review.
