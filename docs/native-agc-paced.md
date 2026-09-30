@@ -36,7 +36,7 @@ Configured-but-inactive is distinguishable by `running=0` and error reporting.
 | --- | --- |
 | `~` | Toggle paced / continuous native AGC; disabling always allowed |
 | `:` | Cycle period: 250, 500, 1000, 2000, 5000, 10000, 16683 (NTSC field), 20000 (PAL field) us |
-| `;` | Cycle window: 10, 20, 50, 100, 200 us |
+| `;` | Cycle window: 0 = one acquisition (open until 7078 re-enters the start gain and the gain then holds still 1 us; 60 us timeout), 1, 2, 3, 5 (exact, CPU-timed in the ISR), 10, 20, 50, 100, 200 us |
 | `T` | Print `AGC_PACE` configuration and timer diagnostics |
 
 Period/window changes start pacing. Choices are RAM-only; reboot uses build
