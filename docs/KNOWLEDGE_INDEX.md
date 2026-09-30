@@ -32,6 +32,7 @@ Modern C5VRX
 
 | Subject | Start here |
 |---|---|
+| C5-only receiver redesign: analog PHY, native gain policy, issues #134/#135, constrained DSP and span-75 audit | [c5-best-pipeline-research.md](c5-best-pipeline-research.md) |
 | Cross-PR canonical findings, corrected assumptions, hardware failures, and experiment disposition through PR #77 | [pr-derived-findings.md](pr-derived-findings.md) |
 | Phase5-360 comprehensive findings, MODEM_DIAG lane analysis, Counter-A subtraction, and PR #83-#94 resolution | [phase5-360-comprehensive-findings.md](phase5-360-comprehensive-findings.md) |
 | Phase5-360 architecture specification, 2-bit quadrant oracle, and 16-bit word packing | [phase5_360_architecture.md](../tools/phase5_360_architecture.md) |
