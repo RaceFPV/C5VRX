@@ -35,7 +35,7 @@ Configured-but-inactive is distinguishable by `running=0` and error reporting.
 | Key | Action |
 | --- | --- |
 | `~` | Toggle paced / continuous native AGC; disabling always allowed |
-| `:` | Cycle period: 250, 500, 1000, 2000, 5000, 10000, 20000 us |
+| `:` | Cycle period: 250, 500, 1000, 2000, 5000, 10000, 16683 (NTSC field), 20000 (PAL field) us |
 | `;` | Cycle window: 10, 20, 50, 100, 200 us |
 | `T` | Print `AGC_PACE` configuration and timer diagnostics |
 

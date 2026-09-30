@@ -168,7 +168,9 @@ void native_agc_pace_report(void)
 
 void native_agc_pace_cycle(bool window)
 {
-    static const uint32_t periods[] = {250, 500, 1000, 2000, 5000, 10000, 20000};
+    /* 16683 us = one NTSC field and 20000 us = one PAL field: the open window
+     * then lands on nearly the same line every field instead of wandering. */
+    static const uint32_t periods[] = {250, 500, 1000, 2000, 5000, 10000, 16683, 20000};
     static const uint32_t windows[] = {10, 20, 50, 100, 200};
     const uint32_t *values = window ? windows : periods;
     unsigned count = window ? sizeof(windows)/sizeof(windows[0]) :
