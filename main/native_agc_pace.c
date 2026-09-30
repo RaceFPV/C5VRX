@@ -214,7 +214,7 @@ esp_err_t native_agc_pace_resume(void)
 
 esp_err_t native_agc_pace_set(uint32_t period, uint32_t window)
 {
-    if (period && (period < 250 || period > 20000 ||
+    if (period && (period < 250 || period > 40000 ||
                    window > 200 || window >= period)) return ESP_ERR_INVALID_ARG;
     native_agc_pace_suspend();
     portENTER_CRITICAL(&s_lock);
@@ -251,7 +251,8 @@ void native_agc_pace_cycle(bool window)
 {
     /* 16683 us = one NTSC field and 20000 us = one PAL field: the open window
      * then lands on nearly the same line every field instead of wandering. */
-    static const uint32_t periods[] = {250, 500, 1000, 2000, 5000, 10000, 16683, 20000};
+    static const uint32_t periods[] = {250, 500, 1000, 2000, 5000, 10000, 16683, 20000,
+                                       33367, 40000};  /* + one NTSC / PAL frame */
     static const uint32_t windows[] = {0, 1, 2, 3, 5, 10, 20, 50, 100, 200};
     const uint32_t *values = window ? windows : periods;
     unsigned count = window ? sizeof(windows)/sizeof(windows[0]) :
