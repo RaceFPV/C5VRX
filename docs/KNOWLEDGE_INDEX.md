@@ -98,3 +98,4 @@ describe a diagnostic mode or future proof gate rather than the default build.
   BitScrambler, >40 MB/s live TX overclocking, raw-Q4 observers on transformed
   rings, or a synthetic raster as the normal receiver.
 | Range max: dB budget, noise-referenced lanes, BW gear, sync flywheel + colour killer, two-bundle demod limits, hardware plan | [range-max.md](range-max.md) |
+| C5VRX-5 pipeline research: measured-vs-model loss budget, native AGC + fine tap, PHY pre-detection filter, HC8 decoder, DAC transfer, experiment order | [c5vrx5-pipeline-research.md](c5vrx5-pipeline-research.md) |
