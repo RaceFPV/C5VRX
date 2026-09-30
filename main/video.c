@@ -281,6 +281,8 @@ static direct_gain_v3_t s_direct_gain_v3;
 static volatile int s_v3_p50, s_v3_p90, s_v3_p95, s_v3_origin_pm;
 static volatile int s_v3_clip_pm, s_v3_coherence;
 static TaskHandle_t s_v3_observer_task_handle;
+/* Direct Gain V5 operating level (dg3_levels); 'J' cycles it live. */
+static volatile uint8_t s_dg3_level = 1u;
 static TaskHandle_t s_v3_sentinel_task_handle;
 static esp_timer_handle_t s_v3_sentinel_timer;
 static volatile uint32_t s_v3_fast_overload_state;
@@ -1131,7 +1133,11 @@ static const char *rx_profile_name(void)
     case RX_PROFILE_ARC_V3_EXP:  return "ARC V3 EXP";
     case RX_PROFILE_ARC_V5_AUTOTUNE_EXP: return "ARC V5 AUTOTUNE";
 #if CONFIG_C5VRX_DIRECT_GAIN_V3_EXPERIMENT
-    case RX_PROFILE_DIRECT_GAIN: return "DIRECT GAIN V5";
+    case RX_PROFILE_DIRECT_GAIN: {
+        static const char *const names[DG3_LEVELS] = {
+            "DIRECT GAIN V5 L0", "DIRECT GAIN V5 L1", "DIRECT GAIN V5 L2"};
+        return names[s_dg3_level < DG3_LEVELS ? s_dg3_level : 0u];
+    }
 #else
     case RX_PROFILE_DIRECT_GAIN: return "DIRECT GAIN V2";
 #endif
@@ -1580,7 +1586,7 @@ static void direct_gain_v3_sentinel_task(void *arg)
         dg3_observation_t observation = direct_gain_v3_measure(
             sample, sizeof(sample), c5vrx_phase8_gain_lut,
             (uint64_t)esp_timer_get_time());
-        if (observation.clip_pm < 125u && observation.p95 < 95u) continue;
+        if (!direct_gain_v3_saturated(s_dg3_level, &observation)) continue;
         if (!__sync_bool_compare_and_swap(&s_v3_fast_overload_state, 0u, 1u))
             continue;
         s_v3_fast_overload_observation = observation;
@@ -1618,6 +1624,7 @@ static void direct_gain_v3_observer_task(void *arg)
             s_direct_gain_v3.current_gain != s_current_gain) {
             direct_gain_v3_reset(&s_direct_gain_v3, rf_get_arc_gain_table(),
                                  s_current_gain, rf_get_arc_survival_gain());
+            direct_gain_v3_set_level(&s_direct_gain_v3, s_dg3_level);
             seen_profile = profile;
             seen_arc = arc;
             was_active = true;
@@ -1633,6 +1640,8 @@ static void direct_gain_v3_observer_task(void *arg)
             continue;
         }
 
+        if (s_direct_gain_v3.level != s_dg3_level)
+            direct_gain_v3_set_level(&s_direct_gain_v3, s_dg3_level);
         uint32_t gain_epoch = s_gain_transition_count;
         int block_idx = -1;
         if (!rx_probe_copy_completed_idx(sample, &block_idx)) continue;
@@ -5159,6 +5168,13 @@ static void console_diag_task(void *arg)
                     lab_request_fresh_phy_calibration();
                 } else if (c == 'R') {
                     lab_run_rssi_gain_probe();
+                } else if (c == 'J') {
+                    uint8_t next = (uint8_t)((s_dg3_level + 1u) % DG3_LEVELS);
+                    s_dg3_level = next;
+                    const dg3_level_t *l = &dg3_levels[next];
+                    printf("[DG5] level L%u: P50 band %u-%u, rail<%u pm, "
+                           "sat %u pm\n", (unsigned)next, l->lo, l->hi,
+                           l->healthy_clip_pm, l->sat_clip_pm);
                 } else if (c == 'D') {
                     apply_rx_profile(RX_PROFILE_DIRECT_GAIN);
                     settings_save();

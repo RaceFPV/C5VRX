@@ -158,6 +158,33 @@ int main(void)
     uint8_t pre_sat = v3.current_gain;
     assert(direct_gain_v3_tick(&v3, &sat) < pre_sat);
 
+    /* Levels: L2 holds a strong envelope with ~25 % rail samples that L0
+     * would correct, and still drops immediately on real overload. */
+    {
+        dg3_observation_t strong = obs(45, 80, 0, 250, 95, 9000000u);
+        direct_gain_v3_reset(&v3, &table, 40u, 62u);
+        direct_gain_v3_set_level(&v3, 2u);
+        uint32_t w = v3.writes;
+        assert(direct_gain_v3_tick(&v3, &strong) == 40u);
+        assert(v3.writes == w && v3.state == DG3_HOLD);
+        direct_gain_v3_reset(&v3, &table, 40u, 62u);
+        assert(v3.level == 0u);
+        strong.observed_us += 1000u;
+        assert(direct_gain_v3_tick(&v3, &strong) < 40u);
+        dg3_observation_t rail = obs(60, 90, 0, 150, 95, 0u);
+        assert(direct_gain_v3_saturated(0u, &rail));
+        assert(!direct_gain_v3_saturated(2u, &rail));
+        rail.clip_pm = 700u;
+        assert(direct_gain_v3_saturated(2u, &rail));
+        for (unsigned i = 0; i < DG3_LEVELS; ++i) {
+            const dg3_level_t *l = &dg3_levels[i];
+            assert(l->lo < l->target_up && l->target_up < l->target_down &&
+                   l->target_down < l->hi && l->healthy_p95 < l->high_p95 &&
+                   l->healthy_clip_pm <= l->high_clip_pm &&
+                   l->high_clip_pm < l->sat_clip_pm && l->high_p95 < l->sat_p95);
+        }
+    }
+
     puts("direct gain v3 core: OK");
     return 0;
 }

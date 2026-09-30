@@ -27,6 +27,25 @@ typedef struct {
     uint64_t observed_us;
 } dg3_observation_t;
 
+/* Operating level: where the Q4 envelope is held. Units are the core's
+ * Q4 power (bucket-centre radius squared, 0..113; axis rail ~56). A higher
+ * level uses more of the 4-bit IQ range (finer Phase8 angle steps) and
+ * tolerates more rail samples, which Phase8 handles well because per-axis
+ * clipping only bends the angle slightly. */
+typedef struct {
+    uint8_t lo, hi;                 /* healthy P50 band */
+    uint8_t target_up, target_down; /* P50 aimed for after a correction */
+    uint8_t healthy_p95;            /* also the prediction P95 ceiling */
+    uint16_t healthy_clip_pm;
+    uint8_t high_p90, high_p95;
+    uint16_t high_clip_pm;
+    uint16_t sat_clip_pm;           /* emergency drop */
+    uint8_t sat_p95;
+} dg3_level_t;
+
+#define DG3_LEVELS 3u
+extern const dg3_level_t dg3_levels[DG3_LEVELS];
+
 typedef struct {
     arc_gain_table_t table;
     arc_gain_tuple_t tuple[DG3_STATES];
@@ -54,7 +73,13 @@ typedef struct {
     uint8_t reversals;
     uint64_t dir_write_us, damp_until_us;
     uint32_t damp_events;
+    uint8_t level;   /* index into dg3_levels; reset selects L0 */
 } direct_gain_v3_t;
+
+/* Select the operating level (clamped); takes effect on the next window. */
+void direct_gain_v3_set_level(direct_gain_v3_t *v3, uint8_t level);
+/* Saturation test shared with the fast overload sentinel. */
+bool direct_gain_v3_saturated(uint8_t level, const dg3_observation_t *o);
 
 void direct_gain_v3_reset(direct_gain_v3_t *v3, const arc_gain_table_t *table,
                           uint8_t current_gain, uint8_t survival_gain);

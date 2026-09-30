@@ -38,6 +38,36 @@ static int clamp_i(int value, int low, int high)
 
 static int abs_i(int value) { return value < 0 ? -value : value; }
 
+/* L0 is the V5 band (radius ~3.6-5.7 codes, no rail). L1 and L2 raise the
+ * held envelope toward the 4-bit rail (L2 radius ~5.3-7.2, up to ~30 % rail
+ * samples at the top of the band) for finer Phase8 angle quantization. */
+const dg3_level_t dg3_levels[DG3_LEVELS] = {
+    {13, 32, 17, 27, 65,  20, 53,  72,  20, 100,  95},
+    {20, 42, 26, 36, 80, 150, 66,  88, 150, 350, 100},
+    {28, 52, 34, 46, 95, 350, 80, 100, 350, 600, 108},
+};
+
+#define DG3_DEFAULT_LEVEL 0u
+
+static const dg3_level_t *lv(const direct_gain_v3_t *v3)
+{
+    return &dg3_levels[v3->level < DG3_LEVELS ? v3->level : 0u];
+}
+
+void direct_gain_v3_set_level(direct_gain_v3_t *v3, uint8_t level)
+{
+    if (!v3) return;
+    v3->level = level < DG3_LEVELS ? level : (uint8_t)(DG3_LEVELS - 1u);
+    v3->high_windows = v3->weak_windows = 0;
+    v3->last_direction = 0;
+}
+
+bool direct_gain_v3_saturated(uint8_t level, const dg3_observation_t *o)
+{
+    const dg3_level_t *l = &dg3_levels[level < DG3_LEVELS ? level : 0u];
+    return o->clip_pm >= l->sat_clip_pm || o->p95 >= l->sat_p95;
+}
+
 static void prepare_lut(void)
 {
     if (s_lut_ready) return;
@@ -114,16 +144,21 @@ static bool carrier(const dg3_observation_t *o)
     return o->coherence >= 55 && o->p50 >= 5 && o->origin_pm < 650;
 }
 
-static bool healthy(const dg3_observation_t *o)
+static bool healthy(const direct_gain_v3_t *v3, const dg3_observation_t *o)
 {
-    return carrier(o) && o->p50 >= 13 && o->p50 <= 32 &&
-           o->p95 <= 65 && o->clip_pm < 20 && o->origin_pm <= 250;
+    const dg3_level_t *l = lv(v3);
+    return carrier(o) && o->p50 >= l->lo && o->p50 <= l->hi &&
+           o->p95 <= l->healthy_p95 && o->clip_pm < l->healthy_clip_pm &&
+           o->origin_pm <= 250;
 }
 
-static bool valid_learning(const dg3_observation_t *o)
+static bool valid_learning(const direct_gain_v3_t *v3,
+                           const dg3_observation_t *o)
 {
-    return carrier(o) && o->p50 >= 7 && o->p50 <= 45 &&
-           o->p95 < 80 && o->clip_pm < 20 && o->origin_pm < 300;
+    const dg3_level_t *l = lv(v3);
+    return carrier(o) && o->p50 >= 7 && o->p50 <= l->hi + 13 &&
+           o->p95 < l->high_p95 + 8 && o->clip_pm < l->healthy_clip_pm &&
+           o->origin_pm < 300;
 }
 
 static int power_db_q8(unsigned power)
@@ -157,6 +192,7 @@ void direct_gain_v3_reset(direct_gain_v3_t *v3, const arc_gain_table_t *table,
 {
     if (!v3) return;
     memset(v3, 0, sizeof(*v3));
+    v3->level = DG3_DEFAULT_LEVEL;   /* callers re-apply their level */
     prepare_lut();
     if (table && table->max_index >= 20u &&
         table->max_index <= ARC_VENDOR_GAIN_MAX) v3->table = *table;
@@ -285,7 +321,8 @@ static uint8_t select_destination(const direct_gain_v3_t *v3,
         if (!predict(v3, (uint8_t)g, &ratio, &uncertainty)) continue;
         int p50 = (int)o->p50 * ratio / 1024;
         int p95_worst = (int)o->p95 * ratio * (1000 + uncertainty) / 1024000;
-        if (p50 < 13 || p50 > 32 || p95_worst > 65) continue;
+        if (p50 < lv(v3)->lo || p50 > lv(v3)->hi ||
+            p95_worst > lv(v3)->healthy_p95) continue;
         if (up && ratio <= 1024) continue;
         if (!up && ratio >= 1024) continue;
         int kind = transition_kind(v3, v3->current_gain, (uint8_t)g);
@@ -315,7 +352,7 @@ static uint8_t select_destination(const direct_gain_v3_t *v3,
 static void learn_transition(direct_gain_v3_t *v3,
                              const dg3_observation_t *after)
 {
-    if (!valid_learning(&v3->before) || !valid_learning(after) ||
+    if (!valid_learning(v3, &v3->before) || !valid_learning(v3, after) ||
         abs_i((int)v3->before.coherence - (int)after->coherence) > 15) return;
     const dg3_observation_t *prior = &v3->before_previous;
     if (!prior->observed_us || prior->observed_us >= v3->before.observed_us ||
@@ -404,7 +441,7 @@ uint8_t direct_gain_v3_tick(direct_gain_v3_t *v3,
     dg3_observation_t prior = v3->last_tracking;
     v3->last_tracking = *o;
     bool no_carrier = o->p50 <= 4 && o->origin_pm >= 650 && o->coherence < 20;
-    bool saturated = o->clip_pm >= 100 || o->p95 >= 95;
+    bool saturated = direct_gain_v3_saturated(v3->level, o);
     if (no_carrier) {
         /* No usable carrier: listen at the table's maximum gain, not at the
          * survival gain (first index of the highest RF stage, G62). A weak
@@ -456,10 +493,10 @@ uint8_t direct_gain_v3_tick(direct_gain_v3_t *v3,
         uint16_t *score = &v3->artifact_score[v3->current_gain];
         *score = *score ? (uint16_t)((3u * *score + artifact) / 4u) :
                           (uint16_t)artifact;
-        if (o->clip_pm >= 100 || o->origin_pm >= 500 || o->coherence < 30) {
+        if (saturated || o->origin_pm >= 500 || o->coherence < 30) {
             if (v3->bad_state[v3->current_gain] < 15u)
                 ++v3->bad_state[v3->current_gain];
-        } else if (healthy(o)) v3->bad_state[v3->current_gain] = 0u;
+        } else if (healthy(v3, o)) v3->bad_state[v3->current_gain] = 0u;
         learn_transition(v3, o);
         v3->state = DG3_VERIFY;
         ++v3->verified;
@@ -470,7 +507,7 @@ uint8_t direct_gain_v3_tick(direct_gain_v3_t *v3,
         v3->virtual_gain_q8 = 0;
         return start_write(v3, o, &prior, emergency_drop(v3));
     }
-    if (healthy(o)) {
+    if (healthy(v3, o)) {
         v3->state = DG3_HOLD;
         v3->corrections = 0;
         v3->high_windows = v3->weak_windows = 0;
@@ -479,16 +516,19 @@ uint8_t direct_gain_v3_tick(direct_gain_v3_t *v3,
         ++v3->holds;
         return v3->current_gain;
     }
-    /* Act as soon as the envelope leaves the healthy band (13..32), before
-     * it reaches the grainy/collapsing region, not after noise appeared. */
-    bool high = o->p50 > 32 || o->p90 >= 53 || o->p95 > 72 ||
-                o->clip_pm >= 20;
-    bool weak = o->p50 < 13 && carrier(o);
+    /* Act as soon as the envelope leaves the healthy band, before it
+     * reaches the grainy/collapsing region, not after noise appeared. */
+    const dg3_level_t *l = lv(v3);
+    bool high = o->p50 > l->hi || o->p90 >= l->high_p90 ||
+                o->p95 > l->high_p95 || o->clip_pm >= l->high_clip_pm;
+    bool weak = o->p50 < l->lo && carrier(o);
     /* Schmitt bands retain the previous direction through small envelope
      * fluctuations; they release only after crossing the inner boundary. */
     if (v3->last_direction == 2 &&
-        (o->p50 > 30 || o->p90 > 47 || o->p95 > 65)) high = true;
-    if (v3->last_direction == 1 && o->p50 < 14 && carrier(o)) weak = true;
+        (o->p50 > l->hi - 2 || o->p90 > l->high_p90 - 6 ||
+         o->p95 > l->high_p95 - 7)) high = true;
+    if (v3->last_direction == 1 && o->p50 < l->lo + 1 && carrier(o))
+        weak = true;
     if (high) {
         v3->weak_windows = 0;
         v3->last_direction = 2;
@@ -507,7 +547,7 @@ uint8_t direct_gain_v3_tick(direct_gain_v3_t *v3,
     unsigned need_weak = damped ? DG3_DAMPED_WINDOWS : DG3_WEAK_WINDOWS;
     if ((high && v3->high_windows < need_high) ||
         (weak && v3->weak_windows < need_weak)) return v3->current_gain;
-    int target_power = weak ? 17 : 27;
+    int target_power = weak ? l->target_up : l->target_down;
     int error_q8 = power_db_q8((unsigned)target_power) -
                    power_db_q8(o->p50);
     /* Direct: request the full relative correction in one step, both ways. */
