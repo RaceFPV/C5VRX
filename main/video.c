@@ -1255,7 +1255,7 @@ static const char *output_mode_name(void)
 /* PHASE8_FINE = the PHASE8_FULL program on the issue #123 fine IQ lanes
  * (sign, bits 7..5): same signed-nibble LUT, twice the angular resolution. */
 typedef enum { LIVE_PHASE8_FULL, LIVE_GOLDEN, LIVE_PHASE8_VIDEO, LIVE_PHASE8_FINE,
-               LIVE_AGC_GUARD } live_demod_t;
+               LIVE_AGC_GUARD, LIVE_PHASE8_ULTRA } live_demod_t;
 static live_demod_t s_live_demod = LIVE_PHASE8_FULL;
 
 static const char *demod_mode_name(void)
@@ -1264,7 +1264,8 @@ static const char *demod_mode_name(void)
     return s_live_demod == LIVE_GOLDEN ? "PHASE5" :
            s_live_demod == LIVE_PHASE8_VIDEO ? "P8 VIDEO32" :
            s_live_demod == LIVE_AGC_GUARD ? "AGC GUARD" :
-           s_live_demod == LIVE_PHASE8_FINE ? "P8 FINE" : "PHASE8 FULL";
+           s_live_demod == LIVE_PHASE8_FINE ? "P8 FINE" :
+           s_live_demod == LIVE_PHASE8_ULTRA ? "P8 ULTRAFINE" : "PHASE8 FULL";
 #else
     return "PHASE5";
 #endif
@@ -1276,7 +1277,8 @@ static const char *live_demod_tag(void)
     return s_live_demod == LIVE_GOLDEN ? "GOLDEN" :
            s_live_demod == LIVE_PHASE8_VIDEO ? "PHASE8_VIDEO32" :
            s_live_demod == LIVE_AGC_GUARD ? "AGC_RAIL_GUARD" :
-           s_live_demod == LIVE_PHASE8_FINE ? "PHASE8_FINE" : "PHASE8_FULL";
+           s_live_demod == LIVE_PHASE8_FINE ? "PHASE8_FINE" :
+           s_live_demod == LIVE_PHASE8_ULTRA ? "PHASE8_ULTRAFINE" : "PHASE8_FULL";
 #else
     return s_demod_mode == DEMOD_MODE_TRAJECTORY_V2 ? "TRAJ_V2" : "GOLDEN";
 #endif
@@ -1294,7 +1296,7 @@ static live_demod_t demod_boot_requested(void)
             value = old == 1u ? LIVE_GOLDEN : LIVE_PHASE8_FULL;
     }
     nvs_close(handle);
-    return value <= LIVE_AGC_GUARD ? (live_demod_t)value : LIVE_PHASE8_FULL;
+    return value <= LIVE_PHASE8_ULTRA ? (live_demod_t)value : LIVE_PHASE8_FULL;
 }
 
 static esp_err_t persist_live_demod(live_demod_t mode)
@@ -3956,7 +3958,8 @@ static void menu_draw_video_page(void)
     bool experimental = s_output_mode == VIDEO_OUTPUT_4BIT_80;
 #if CONFIG_C5VRX_PHASE8_HR_LIVE_TEST
     experimental = experimental || s_live_demod == LIVE_PHASE8_VIDEO ||
-                   s_live_demod == LIVE_PHASE8_FINE || s_live_demod == LIVE_AGC_GUARD;
+                   s_live_demod == LIVE_PHASE8_FINE || s_live_demod == LIVE_AGC_GUARD ||
+                   s_live_demod == LIVE_PHASE8_ULTRA;
 #endif
     menu_draw_page_title("VIDEO OUTPUT", experimental ? "EXPERIMENTAL" : "DEFAULT");
     menu_ui_value_box(100, 22, 130, "DAC", output_mode_name());
@@ -4010,7 +4013,10 @@ static void quiet_tx_interrupts(void)
 
 static void start_flight_demodulator(void)
 {
-    if (s_live_demod != LIVE_PHASE8_FULL) (void)native_agc_pace_set(0, 20);
+    /* Pacing keeps the envelope inside the finer IQ windows, so it stays on
+     * for all three Phase8 lane levels; other demodulators run continuous. */
+    if (s_live_demod != LIVE_PHASE8_FULL && s_live_demod != LIVE_PHASE8_FINE &&
+        s_live_demod != LIVE_PHASE8_ULTRA) (void)native_agc_pace_set(0, 20);
     ESP_ERROR_CHECK(bitscrambler_enable(s_flight_bs));
 #if CONFIG_C5VRX_PHASE8_HR_LIVE_TEST
     ESP_ERROR_CHECK(s_output_mode == VIDEO_OUTPUT_6BIT_40 ?
@@ -4021,7 +4027,8 @@ static void start_flight_demodulator(void)
                                              s_live_demod == LIVE_AGC_GUARD ? s_fm_agc_guard_program :
                                              s_fm_phase8_hr_live_program));
     /* Lanes switch before the demodulator starts, never mid-stream. */
-    rf_set_fine_iq(s_live_demod == LIVE_PHASE8_FINE);
+    rf_set_iq_lanes(s_live_demod == LIVE_PHASE8_ULTRA ? 2u :
+                    s_live_demod == LIVE_PHASE8_FINE ? 1u : 0u);
 #else
     if (s_output_mode == VIDEO_OUTPUT_4BIT_80) {
         ESP_ERROR_CHECK(bitscrambler_load_program(s_flight_bs, s_fm4_program));
@@ -4476,7 +4483,8 @@ static void handle_button_long_click(void)
 #if CONFIG_C5VRX_PHASE8_HR_LIVE_TEST
             live_demod_t next = s_live_demod == LIVE_GOLDEN ? LIVE_PHASE8_FULL :
                                s_live_demod == LIVE_PHASE8_FULL ? LIVE_PHASE8_FINE :
-                               s_live_demod == LIVE_PHASE8_FINE ? LIVE_PHASE8_VIDEO :
+                               s_live_demod == LIVE_PHASE8_FINE ? LIVE_PHASE8_ULTRA :
+                               s_live_demod == LIVE_PHASE8_ULTRA ? LIVE_PHASE8_VIDEO :
                                s_live_demod == LIVE_PHASE8_VIDEO ? LIVE_AGC_GUARD : LIVE_GOLDEN;
             esp_err_t err = persist_live_demod(next);
             if (err == ESP_OK) s_live_demod = next;
@@ -4892,7 +4900,8 @@ static void analog_agc_task(void *arg)
             }
             bool aoc_save;
             uint8_t aoc_p50 = (uint8_t)(p_median > 255 ? 255 : p_median);
-            if (rf_fine_iq_active()) aoc_p50 /= 4u;   /* fine lanes: 2x radius */
+            if (rf_iq_lane_level() == 2u) aoc_p50 /= 16u;  /* ultrafine: 4x radius */
+            else if (rf_fine_iq_active()) aoc_p50 /= 4u;   /* fine lanes: 2x radius */
             if (aoc_tick(&s_aoc,
                          settle_ticks == 0 && sampled_gain_epoch == s_gain_transition_count &&
                          sampled_rf_context == afc_ctx,

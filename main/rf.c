@@ -136,7 +136,15 @@ static const uint8_t s_iq_diag_fine[8] = {
     5u, 6u, 7u, 9u,
     15u, 16u, 17u, 19u,
 };
+/* P8 ULTRAFINE: {sign 9, 6, 5, 4}, 4x the coarse resolution, window
+ * |x| < 128 codes. DIAG[4]/[14] (Q4/I4) are proven bit-exact as well
+ * (analyze_all_diag.py pass Q_BUS_0_5 and I_BUS_4_9). */
+static const uint8_t s_iq_diag_ultra[8] = {
+    4u, 5u, 6u, 9u,
+    14u, 15u, 16u, 19u,
+};
 static bool s_iq_fine;
+static uint8_t s_iq_level;
 
 /* Internal vendor symbol -- globally exported by the pinned IDF 6.0.x
  * pp (protocol processing) library for ESP32-C5. */
@@ -564,19 +572,36 @@ bool rf_bb_agc_enabled(void)
     return !s_bb_agc_off;
 }
 
-void rf_set_fine_iq(bool fine)
+/* Lane level 0 = coarse {9,8,7,6}, 1 = fine {9,7,6,5}, 2 = ultrafine
+ * {9,6,5,4}. Selecting finer lanes must NOT stop native AGC pacing: the
+ * paced hold is what keeps the envelope inside the finer window. (Before,
+ * choosing P8 FINE silently disabled pacing, so FINE ran on continuous
+ * native re-acquisitions that overshoot and fold -- rainbow edges.) */
+void rf_set_iq_lanes(uint8_t level)
 {
-    if (fine) (void)native_agc_pace_set(0, 20);
     analog_agc_cancel();
-    if (fine == s_iq_fine) return;
-    const uint8_t *diag = fine ? s_iq_diag_fine : s_iq_diag;
+    if (level > 2u) level = 2u;
+    if (level == s_iq_level) return;
+    const uint8_t *diag = level == 2u ? s_iq_diag_ultra :
+                          level == 1u ? s_iq_diag_fine : s_iq_diag;
     for (unsigned lane = 0u; lane < 8u; ++lane) {
         esp_rom_gpio_connect_out_signal(s_iq_pins[lane],
                                         MODEM_DIAG0_IDX + diag[lane],
                                         false, false);
     }
     __asm__ __volatile__("fence iorw, iorw" ::: "memory");
-    s_iq_fine = fine;
+    s_iq_level = level;
+    s_iq_fine = level != 0u;
+}
+
+void rf_set_fine_iq(bool fine)
+{
+    rf_set_iq_lanes(fine ? 1u : 0u);
+}
+
+uint8_t rf_iq_lane_level(void)
+{
+    return s_iq_level;
 }
 
 bool rf_fine_iq_active(void)

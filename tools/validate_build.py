@@ -56,7 +56,7 @@ c_names = [f.name for f in c_files]
 video_c = read(MAIN / "video.c")
 menu_lifecycle = video_c.split("static void video_set_menu_mode", 1)[1].split("static void menu_cycle_standard_mode", 1)[0]
 
-check("production receiver and dedicated menu/auto-lab modules", set(c_names) == {"main.c", "agc_capture_main.c", "bs_relative_worker_probe.c", "bs_relative_middle_probe.c", "bs_addctia_probe.c", "phy_phase_tap_probe.c", "arc_phy.c", "arc_v3_controller.c", "arc_v5_autotune.c", "rx_auto_lab.c", "rf.c", "video.c", "direct_gain.c", "direct_gain_v2.c", "direct_gain_v3.c", "menu_raster.c"},
+check("production receiver and dedicated menu/auto-lab modules", set(c_names) == {"main.c", "agc_capture_main.c", "bs_relative_worker_probe.c", "bs_relative_middle_probe.c", "bs_addctia_probe.c", "phy_phase_tap_probe.c", "arc_phy.c", "arc_v3_controller.c", "arc_v5_autotune.c", "rx_auto_lab.c", "rf.c", "video.c", "direct_gain.c", "direct_gain_v2.c", "direct_gain_v3.c", "menu_raster.c", "native_agc_pace.c"},
       f"found: {c_names}")
 check("main.c present", "main.c" in c_names)
 check("rf.c present", "rf.c" in c_names)
